@@ -2,13 +2,8 @@
   $username = $_REQUEST['username'];
   $key = $_GET['key'];
 
-  //TODO: Validate username
-
-  $sql_user = "displaym2_reset";
-  $sql_pass = "f9rqDkSR3LcsjNtBdShgYqcX";
-  $sql_db = "displaymanager2";
-  $sql_host = "localhost";
-  //TODO: Validate key and username
+  require(__DIR__ . 'sql.php');
+  
   $DEBUG = false;
 
   $headers = 'From: support@digitalhda.com' . "\r\n" .

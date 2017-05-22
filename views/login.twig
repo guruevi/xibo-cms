@@ -63,7 +63,8 @@
             {% endif %}
 
             <button class="btn btn-large btn-primary" type="submit">{% trans "Login" %}</button>
-        </form>
+            <p style="margin-top: 20px; font-size: 75%" ><a href="/modules/password-reset">Forgot password?</a></p>
+	</form>
 
         <p class="text-center">{% trans %}Version {{ version }}{% endtrans %}
             | <a id="source-link" href="{{ theme.getThemeConfig("cms_source_url") }}">{% trans "Source" %}</a>
