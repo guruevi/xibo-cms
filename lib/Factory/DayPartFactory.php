@@ -75,7 +75,7 @@ class DayPartFactory extends BaseFactory
      */
     public function getById($dayPartId)
     {
-        $dayParts = $this->query(null, ['dayPartId' => $dayPartId]);
+        $dayParts = $this->query(null, ['dayPartId' => $dayPartId, 'disableUserCheck' => 1]);
 
         if (count($dayParts) <= 0)
             throw new NotFoundException();
@@ -118,7 +118,7 @@ class DayPartFactory extends BaseFactory
         $body .= ' WHERE 1 = 1 ';
 
         // View Permissions
-        $this->viewPermissionSql('Xibo\Entity\DayPart', $body, $params, '`daypart`.dayPartId');
+        $this->viewPermissionSql('Xibo\Entity\DayPart', $body, $params, '`daypart`.dayPartId', '`daypart`.userId', $filterBy);
 
         if ($this->getSanitizer()->getInt('dayPartId', $filterBy) !== null) {
             $body .= ' AND `daypart`.dayPartId = :dayPartId ';

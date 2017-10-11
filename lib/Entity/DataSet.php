@@ -393,6 +393,9 @@ class DataSet implements \JsonSerializable
     {
         $this->load();
 
+        // Set the dataSetId
+        $column->dataSetId = $this->dataSetId;
+
         // Set the column order if we need to
         if ($column->columnOrder == 0)
             $column->columnOrder = count($this->columns) + 1;
@@ -487,7 +490,15 @@ class DataSet implements \JsonSerializable
         if ($this->isLookup)
             throw new ConfigurationException(__('Lookup Tables cannot be deleted'));
 
-        // TODO check we aren't being used
+        if ($this->getStore()->exists('
+            SELECT widgetId 
+              FROM `widgetoption`
+              WHERE `widgetoption`.type = \'attrib\'
+                AND `widgetoption`.option = \'dataSetId\'
+                AND `widgetoption`.value = :dataSetId
+        ', ['dataSetId' => $this->dataSetId])) {
+            throw new InvalidArgumentException('Cannot delete because DataSet is in use on one or more Layouts.', 'dataSetId');
+        }
 
         // Delete Permissions
         foreach ($this->permissions as $permission) {
@@ -514,8 +525,8 @@ class DataSet implements \JsonSerializable
     public function deleteData()
     {
         // The last thing we do is drop the dataSet table
-        $this->getStore()->update('TRUNCATE TABLE `dataset_' . $this->dataSetId . '`', []);
-        $this->getStore()->update('ALTER TABLE `dataset_' . $this->dataSetId . '` AUTO_INCREMENT = 1', []);
+        $this->getStore()->isolated('TRUNCATE TABLE `dataset_' . $this->dataSetId . '`', []);
+        $this->getStore()->isolated('ALTER TABLE `dataset_' . $this->dataSetId . '` AUTO_INCREMENT = 1', []);
     }
 
     /**
@@ -568,7 +579,7 @@ class DataSet implements \JsonSerializable
 
     private function dropTable()
     {
-        $this->getStore()->update('DROP TABLE IF EXISTS dataset_' . $this->dataSetId, []);
+        $this->getStore()->isolated('DROP TABLE IF EXISTS dataset_' . $this->dataSetId, []);
     }
 
     /**

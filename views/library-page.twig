@@ -289,5 +289,76 @@
                 });
             });
         }
+
+        ///
+        /// Library Usage Form
+        ///
+        function usageFormOpen(dialog) {
+            // Displays tab
+            var usageTable = $("#usageReportTable").DataTable({
+                "language": dataTablesLanguage,
+                serverSide: true,
+                stateSave: true,
+                filter: false,
+                searchDelay: 3000,
+                "order": [[1, "asc"]],
+                ajax: {
+                    "url": "{{ urlFor("library.usage") }}".replace(":id", $("#usageReportTable").data().mediaId),
+                    "data": function(dataDisplay) {
+                        $.extend(dataDisplay, $(dialog).find("#usageReportForm").serializeObject());
+                        return dataDisplay;
+                    }
+                },
+                "columns": [
+                    { "data": "displayId"},
+                    { "data": "display" },
+                    { "data": "description" }
+                ]
+            });
+
+            usageTable.on('draw', dataTableDraw);
+            usageTable.on('processing.dt', dataTableProcessing);
+
+            $("#mediaEventDateLink").datetimepicker({
+                format: bootstrapDateFormatDateOnly,
+                autoclose: true,
+                language: language,
+                calendarType: calendarType,
+                minView: 2,
+                todayHighlight: true
+            });
+
+            $("#dateClearButton").on("click", function () {
+                $("#mediaEventDateLink").val("")
+                $("#mediaEventDate").val("");
+                $("#mediaEventDateLink").datetimepicker("update");
+                usageTable.ajax.reload();
+            });
+
+            // Layouts tab
+            var usageTableLayouts = $("#usageReportLayoutsTable").DataTable({
+                "language": dataTablesLanguage,
+                serverSide: true,
+                stateSave: true,
+                filter: false,
+                searchDelay: 3000,
+                "order": [[1, "asc"]],
+                ajax: {
+                    "url": "{{ urlFor("library.usage.layouts") }}".replace(":id", $("#usageReportLayoutsTable").data().mediaId)
+                },
+                "columns": [
+                    { "data": "layoutId"},
+                    { "data": "layout" },
+                    { "data": "description" },
+                    {
+                        "orderable": false,
+                        "data": dataTableButtonsColumn
+                    }
+                ]
+            });
+
+            usageTableLayouts.on('draw', dataTableDraw);
+            usageTableLayouts.on('processing.dt', dataTableProcessing);
+        }
     </script>
 {% endblock %}

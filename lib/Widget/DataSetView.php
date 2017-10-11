@@ -447,9 +447,14 @@ class DataSetView extends ModuleWidget
         $output .= '    <li>' . __('Name') . ': ' . $this->getName() . '</li>';
 
         // Get the DataSet name
-        $dataSet = $this->dataSetFactory->getById($this->getOption('dataSetId'));
+        try {
+            $dataSet = $this->dataSetFactory->getById($this->getOption('dataSetId'));
 
-        $output .= '    <li>' . __('Source: DataSet named "%s".', $dataSet->dataSet) . '</li>';
+            $output .= '    <li>' . __('Source: DataSet named "%s".', $dataSet->dataSet) . '</li>';
+        } catch (NotFoundException $notFoundException) {
+            $this->getLog()->error('Layout Widget without a DataSet. widgetId: ' . $this->getWidgetId());
+            $output .= '    <li>' . __('Warning: No DataSet found.') . '</li>';
+        }
 
         if ($this->getUseDuration() == 1)
             $output .= '    <li>' . __('Duration') . ': ' . $this->widget->duration . ' ' . __('seconds') . '</li>';
@@ -764,9 +769,6 @@ class DataSetView extends ModuleWidget
                         // Grab the external image
                         $file = $this->mediaFactory->queueDownload('datasetview_' . md5($dataSetId . $mapping['dataSetColumnId'] . $replace), str_replace(' ', '%20', htmlspecialchars_decode($replace)), $expires);
 
-                        // Tag this layout with this file
-                        $this->assignMedia($file->mediaId);
-
                         $replace = ($isPreview)
                             ? '<img src="' . $this->getApp()->urlFor('library.download', ['id' => $file->mediaId, 'type' => 'image']) . '?preview=1" />'
                             : '<img src="' . $file->storedAs . '" />';
@@ -777,14 +779,14 @@ class DataSetView extends ModuleWidget
                         // The content is the ID of the image
                         try {
                             $file = $this->mediaFactory->getById($replace);
+
+                            // Already in the library - assign this mediaId to the Layout immediately.
+                            $this->assignMedia($file->mediaId);
                         }
                         catch (NotFoundException $e) {
                             $this->getLog()->error('Library Image [%s] not found in DataSetId %d.', $replace, $dataSetId);
                             continue;
                         }
-
-                        // Tag this layout with this file
-                        $this->assignMedia($file->mediaId);
 
                         $replace = ($isPreview)
                             ? '<img src="' . $this->getApp()->urlFor('library.download', ['id' => $file->mediaId, 'type' => 'image']) . '?preview=1" />'
@@ -794,7 +796,14 @@ class DataSetView extends ModuleWidget
                     $table .= '<td class="DataSetColumn" id="column_' . ($i + 1) . '"><span class="DataSetCellSpan" id="span_' . $rowCount . '_' . ($i + 1) . '">' . $replace . '</span></td>';
                 }
 
-                $this->mediaFactory->processDownloads();
+                // Process queued downloads
+                $this->mediaFactory->processDownloads(function($media) {
+                    // Success
+                    $this->getLog()->debug('Successfully downloaded ' . $media->mediaId);
+
+                    // Tag this layout with this file
+                    $this->assignMedia($media->mediaId);
+                });
 
                 $table .= '</tr>';
 

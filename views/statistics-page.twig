@@ -34,7 +34,7 @@
                     </div>
                 </div>
                 <div class="XiboData">
-                    <div id="bandwidthChart" style="clear:both; height: 230px;"></div>
+                    <canvas id="bandwidthChart" style="clear:both; margin-top:25px;" height="330"></canvas>
                 </div>
             </div>
         </div>
@@ -46,14 +46,22 @@
                 <div class="XiboFilter">
                     <div class="FilterDiv" id="availabilityFilter">
                         <form class="form-inline">
-                            {{ inline.date("availabilityFromDt", "From Date", defaults.fromDate, "", "", "", "") }}
-                            {{ inline.date("availabilityToDt", "To Date", defaults.toDate, "", "", "", "") }}
-                            {{ inline.dropdown("displayId", "single", "Display", "", displayFilterOptions, "displayId", "display") }}
+                            {% set title %}{% trans "From Date" %}{% endset %}
+                            {{ inline.date("availabilityFromDt", title, defaults.fromDate, "", "", "", "") }}
+
+                            {% set title %}{% trans "To Date" %}{% endset %}
+                            {{ inline.date("availabilityToDt", title, defaults.toDate, "", "", "", "") }}
+
+                            {% set title %}{% trans "Display" %}{% endset %}
+                            {{ inline.dropdown("displayId", "single", title, "", displayFilterOptions, "displayId", "display") }}
+
+                            {% set title %}{% trans "Only show currently logged in?" %}{% endset %}
+                            {{ inline.checkbox("onlyLoggedIn", title) }}
                         </form>
                     </div>
                 </div>
-                <div class="XiboData">
-                    <div id="availabilityChart" style="clear:both; height: 230px;"></div>
+                <div class="XiboData" style="margin-top: 25px;">
+                    <canvas id="availabilityChart" style="clear:both; margin-top:25px;" height="330"></canvas>
                 </div>
             </div>
         </div>
@@ -95,8 +103,8 @@
                                 <th>{% trans "Widget ID" %}</th>
                                 <th>{% trans "Media" %}</th>
                                 <th>{% trans "Number of Plays" %}</th>
-                                <th>{% trans "Total Duration (s)" %}</th>
                                 <th>{% trans "Total Duration" %}</th>
+                                <th>{% trans "Total Duration (s)" %}</th>
                                 <th>{% trans "First Shown" %}</th>
                                 <th>{% trans "Last Shown" %}</th>
                             </tr>
@@ -155,15 +163,6 @@
         });
 
         var bandwidthChart = null;
-        var bandwidthChartOptions = {
-            element: 'bandwidthChart',
-            data: [],
-            xkey: 'label',
-            ykeys: ['value'],
-            labels: ['{% trans "Bandwidth" %}'],
-            stacked: false,
-            postUnits: ''
-        };
 
         function setBandwidthChart() {
             $.ajax({
@@ -173,14 +172,42 @@
                 dataType: "json",
                 data: $("#bandwidthFilter").find("form").serialize(),
                 success: function(response) {
-                    if (bandwidthChart == null) {
-                        // Create our chart
-                        bandwidthChartOptions.data = response.extra.data;
-                        bandwidthChartOptions.postUnits = response.extra.postUnits;
-                        bandwidthChart = Morris.Bar(bandwidthChartOptions);
-                    } else {
-                        bandwidthChart.setData(response.extra.data);
+
+                    if (bandwidthChart !== undefined && bandwidthChart !== null) {
+                        console.log('Destroying Chart');
+                        bandwidthChart.destroy();
                     }
+
+                    if (response.extra.data.length <= 0) {
+                        return;
+                    }
+
+                    // Create our chart
+                    bandwidthChart = new Chart($("#bandwidthChart"), {
+                        type: "bar",
+                        data: {
+                            labels: response.extra.labels,
+                            datasets: [{
+                                label: "{% trans "Bandwidth" %}",
+                                backgroundColor: "rgb(11, 98, 164)",
+                                data: response.extra.data
+                            }]
+                        },
+                        options: {
+                            scales: {
+                                yAxes: [{
+                                    scaleLabel: {
+                                        display: true,
+                                        labelString: response.extra.postUnits,
+                                    }
+                                }]
+                            },
+                            legend: {
+                                display: false
+                            },
+                            maintainAspectRatio: false,
+                        }
+                    });
                 }
             });
         }
@@ -195,15 +222,6 @@
         });
 
         var availabilityChart = null;
-        var availabilityChartOptions = {
-            element: 'availabilityChart',
-            data: [],
-            xkey: 'label',
-            ykeys: ['value'],
-            labels: ['{% trans "Downtime" %}'],
-            stacked: false,
-            postUnits: ''
-        };
 
         function setAvailabilityChart() {
 
@@ -214,14 +232,41 @@
                 dataType: "json",
                 data: $("#availabilityFilter").find("form").serialize(),
                 success: function(response) {
-                    if (availabilityChart == null) {
-                        // Create our chart
-                        availabilityChartOptions.data = response.extra.data;
-                        availabilityChartOptions.postUnits = ' ' + response.extra.postUnits;
-                        availabilityChart = Morris.Bar(availabilityChartOptions);
-                    } else {
-                        availabilityChart.setData(response.extra.data);
+                    if (availabilityChart !== undefined && availabilityChart !== null) {
+                        console.log('Destroying Chart');
+                        availabilityChart.destroy();
                     }
+
+                    if (response.extra.data.length <= 0) {
+                        return;
+                    }
+
+                    // Create our chart
+                    availabilityChart = new Chart($("#availabilityChart"), {
+                        type: "bar",
+                        data: {
+                            labels: response.extra.labels,
+                            datasets: [{
+                                label: "{% trans "Downtime" %}",
+                                backgroundColor: "rgb(11, 98, 164)",
+                                data: response.extra.data
+                            }]
+                        },
+                        options: {
+                            scales: {
+                                yAxes: [{
+                                    scaleLabel: {
+                                        display: true,
+                                        labelString: response.extra.postUnits,
+                                    }
+                                }]
+                            },
+                            legend: {
+                                display: false
+                            },
+                            maintainAspectRatio: false,
+                        }
+                    });
                 }
             });
         }

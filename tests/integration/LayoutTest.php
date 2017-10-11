@@ -6,6 +6,7 @@
  */
 namespace Xibo\Tests\Integration;
 use Xibo\Helper\Random;
+use Xibo\OAuth2\Client\Entity\XiboCampaign;
 use Xibo\OAuth2\Client\Entity\XiboLayout;
 use Xibo\OAuth2\Client\Entity\XiboRegion;
 use Xibo\Tests\LocalWebTestCase;
@@ -300,6 +301,33 @@ class LayoutTest extends LocalWebTestCase
     }
 
     /**
+    * Edit an existing layout that should fail because of negative value in the backgroundzIndex
+    */
+    public function testEditFailure()
+    {
+        # Check if there are layouts with that name already in the system
+        foreach ($this->startLayouts as $lay) {
+            if ($lay->layout == 'phpunit layout') {
+                $this->skipTest('layout already exists with that name');
+                return;
+            }
+        }
+        # Load in a known layout
+        /** @var XiboLayout $layout */
+        $layout = (new XiboLayout($this->getEntityProvider()))->create('phpunit layout', 'phpunit layout', '', 9);
+        # Change the layout name and description
+        $name = Random::generateString(8, 'phpunit');
+        $description = Random::generateString(8, 'description');
+        $this->client->put('/layout/' . $layout->layoutId, [
+            'name' => $name,
+            'description' => $description,
+            'backgroundColor' => $layout->backgroundColor,
+            'backgroundzIndex' => -1
+        ], ['CONTENT_TYPE' => 'application/x-www-form-urlencoded']);
+        $this->assertSame(500, $this->client->response->status(), 'Expecting failure, received ' . $this->client->response->status());
+    }
+
+    /**
      * Test delete
      * @group minimal
      */
@@ -326,6 +354,31 @@ class LayoutTest extends LocalWebTestCase
         }
         $this->assertTrue($flag, 'Layout ID ' . $layout1->layoutId . ' was not found after deleting a different layout');
         $layout1->delete();
+    }
+
+    /**
+    * Try to delete a layout that is assigned to a campaign
+    */
+    public function testDeleteAssigned()
+    {
+        # Load in a known layout
+        /** @var XiboLayout $layout */
+        $layout = (new XiboLayout($this->getEntityProvider()))->create('phpunit layout assigned', 'phpunit layout', '', 9);
+        // Make a campaign with a known name
+        $name = Random::generateString(8, 'phpunit');
+        /* @var XiboCampaign $campaign */
+        $campaign = (new XiboCampaign($this->getEntityProvider()))->create($name);
+        $this->assertGreaterThan(0, count($layout), 'Cannot find layout for test');
+        // Assign layout to campaign
+        $campaign->assignLayout($layout->layoutId);
+        # Check if it's assigned 
+        $campaignCheck = (new XiboCampaign($this->getEntityProvider()))->getById($campaign->campaignId);
+        $this->assertSame(1, $campaignCheck->numberLayouts);
+        # Try to Delete the layout assigned to the campaign
+        $this->client->delete('/layout/' . $layout->layoutId);
+        # This should return 204 for success
+        $response = json_decode($this->client->response->body());
+        $this->assertSame(204, $response->status, $this->client->response->body());
     }
 
     /**
@@ -466,7 +519,7 @@ class LayoutTest extends LocalWebTestCase
             'top' => 400,
             'left' => 400,
             'loop' => 0,
-            'zIndex' => '1'
+            'zIndex' => 1
             ], ['CONTENT_TYPE' => 'application/x-www-form-urlencoded']);
         # Check if successful
         $this->assertSame(200, $this->client->response->status());
@@ -478,6 +531,29 @@ class LayoutTest extends LocalWebTestCase
         $this->assertSame(500, $object->data->height);
         $this->assertSame(400, $object->data->top);
         $this->assertSame(400, $object->data->left);
+    }
+
+    /**
+     * Edit known region that should fail because of negative z-index value
+     */
+    public function testEditRegionFailure()
+    {
+        # Create layout with random name
+        $name = Random::generateString(8, 'phpunit');
+        $layout = (new XiboLayout($this->getEntityProvider()))->create($name, 'phpunit description', '', 9);
+        # Add region to our layout
+        $region = (new XiboRegion($this->getEntityProvider()))->create($layout->layoutId, 200,300,75,125);
+        # Edit region
+        $this->client->put('/region/' . $region->regionId, [
+            'width' => 700,
+            'height' => 500,
+            'top' => 400,
+            'left' => 400,
+            'loop' => 0,
+            'zIndex' => -1
+            ], ['CONTENT_TYPE' => 'application/x-www-form-urlencoded']);
+        # Check if it failed
+        $this->assertSame(500, $this->client->response->status(), 'Expecting failure, received ' . $this->client->response->status());
     }
   
     /**
@@ -508,21 +584,25 @@ class LayoutTest extends LocalWebTestCase
         $this->client->post('/layout/' . $layout->layoutId . '/tag' , [
             'tag' => ['API']
             ]);
+        $layout = (new XiboLayout($this->getEntityProvider()))->getById($layout->layoutId);
         $this->assertSame(200, $this->client->response->status(), $this->client->response->body());
+        $this->assertSame('API', $layout->tags);
     }
 
     /**
-     * Delete tags to layout
+     * Delete tags from layout
      * @group broken
      */
     public function testDeleteTag()
     {
         $name = Random::generateString(8, 'phpunit');
         $layout = (new XiboLayout($this->getEntityProvider()))->create($name, 'phpunit description', '', 9);
-        $layout->addTag('API');
-
+        $tag = 'API';
+        $layout->addTag($tag);
+        $layout = (new XiboLayout($this->getEntityProvider()))->getById($layout->layoutId);
+        print_r($layout->tags);
         $this->client->delete('/layout/' . $layout->layoutId . '/untag', [
-            'tag' => ['API']
+            'tag' => [$tag]
             ]);
 
         $this->assertSame(200, $this->client->response->status(), 'Not successful: ' . $this->client->response->body());

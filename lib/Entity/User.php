@@ -822,7 +822,6 @@ class User implements \JsonSerializable
                   Retired = :retired,
                   userTypeId = :userTypeId,
                   loggedIn = :loggedIn,
-                  lastAccessed = :lastAccessed,
                   newUserWizard = :newUserWizard,
                   CSPRNG = :CSPRNG,
                   `UserPassword` = :password,
@@ -842,7 +841,6 @@ class User implements \JsonSerializable
             'email' => $this->email,
             'homePageId' => $this->homePageId,
             'retired' => $this->retired,
-            'lastAccessed' => $this->lastAccessed,
             'loggedIn' => $this->loggedIn,
             'newUserWizard' => $this->newUserWizard,
             'CSPRNG' => $this->CSPRNG,
@@ -895,9 +893,9 @@ class User implements \JsonSerializable
     public function touch()
     {
         // This needs to happen on a separate connection
-        $this->getStore()->update('UPDATE `user` SET lastAccessed = :time, loggedIn = 1, newUserWizard = :newUserWizard WHERE userId = :userId', [
+        $this->getStore()->isolated('UPDATE `user` SET lastAccessed = :time, loggedIn = :loggedIn  WHERE userId = :userId', [
             'userId' => $this->userId,
-            'newUserWizard' => $this->newUserWizard,
+            'loggedIn' => $this->loggedIn,
             'time' => date("Y-m-d H:i:s")
         ]);
     }
@@ -1220,7 +1218,7 @@ class User implements \JsonSerializable
 
             if ($row['libraryQuota'] > 0) {
                 $groupId = $row['groupId'];
-                $userQuota = $row['libraryQuota'];
+                $userQuota = intval($row['libraryQuota']);
                 break;
             }
         }
@@ -1244,8 +1242,10 @@ class User implements \JsonSerializable
 
             $fileSize = intval($row['SumSize']);
 
-            if (($fileSize / 1024) <= $userQuota)
+            if (($fileSize / 1024) >= $userQuota) {
+                $this->getLog()->debug('User has exceeded library quota. FileSize: ' . $fileSize . ' bytes, quota is ' . $userQuota * 1024);
                 throw new LibraryFullException(__('You have exceeded your library quota'));
+            }
         }
     }
 

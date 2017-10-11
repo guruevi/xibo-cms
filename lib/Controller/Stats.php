@@ -21,6 +21,7 @@
 namespace Xibo\Controller;
 
 use Xibo\Exception\AccessDeniedException;
+use Xibo\Exception\InvalidArgumentException;
 use Xibo\Factory\DisplayFactory;
 use Xibo\Factory\LayoutFactory;
 use Xibo\Factory\MediaFactory;
@@ -212,7 +213,7 @@ class Stats extends Base
         $displayId = $this->getSanitizer()->getInt('displayId');
         $layoutIds = $this->getSanitizer()->getIntArray('layoutId');
         $mediaIds = $this->getSanitizer()->getIntArray('mediaId');
-        $type = $this->getSanitizer()->getString('type');
+        $type = strtolower($this->getSanitizer()->getString('type'));
 
         // What if the fromdt and todt are exactly the same?
         // in this case assume an entire day from midnight on the fromdt to midnight on the todt (i.e. add a day to the todt)
@@ -230,7 +231,7 @@ class Stats extends Base
         }
 
         if (count($display_ids) <= 0)
-            trigger_error(__('No displays with View permissions'), E_USER_ERROR);
+            throw new InvalidArgumentException(__('No displays with View permissions'), 'displays');
 
         // Media on Layouts Ran
         $select = '
@@ -314,7 +315,7 @@ class Stats extends Base
             $params['displayId'] = $displayId;
         }
 
-        $body .= 'GROUP BY stat.type, display.Display, layout.Layout, layout.layoutId, stat.mediaId, IFNULL(`media`.name, IFNULL(`widgetoption`.value, `widget`.type)) ';
+        $body .= 'GROUP BY stat.type, display.Display, layout.Layout, layout.layoutId, stat.mediaId, stat.widgetId, IFNULL(`media`.name, IFNULL(`widgetoption`.value, `widget`.type)) ';
 
         // Sorting?
         $filterBy = $this->gridRenderFilter();
@@ -373,6 +374,7 @@ class Stats extends Base
         $fromDt = $this->getSanitizer()->getDate('fromDt', $this->getSanitizer()->getDate('availabilityFromDt'));
         $toDt = $this->getSanitizer()->getDate('toDt', $this->getSanitizer()->getDate('availabilityToDt'));
         $displayId = $this->getSanitizer()->getInt('displayId');
+        $onlyLoggedIn = $this->getSanitizer()->getCheckbox('onlyLoggedIn') == 1;
 
         // Get an array of display id this user has access to.
         $displayIds = array();
@@ -382,7 +384,7 @@ class Stats extends Base
         }
 
         if (count($displayIds) <= 0)
-            trigger_error(__('No displays with View permissions'), E_USER_ERROR);
+            throw new InvalidArgumentException(__('No displays with View permissions'), 'displays');
 
         // Get some data for a bandwidth chart
         $params = array(
@@ -392,17 +394,21 @@ class Stats extends Base
 
         $SQL = '
             SELECT display.display,
-                SUM(LEAST(end, :end) - GREATEST(start, :start)) AS duration
+                SUM(LEAST(IFNULL(`end`, :end), :end) - GREATEST(`start`, :start)) AS duration
               FROM `displayevent`
                 INNER JOIN `display`
                 ON display.displayId = `displayevent`.displayId
-             WHERE start <= :end
-                AND end >= :start
+             WHERE `start` <= :end
+                AND IFNULL(`end`, :end) >= :start
                 AND display.displayId IN (' . implode(',', $displayIds) . ') ';
 
         if ($displayId != 0) {
             $SQL .= ' AND display.displayId = :displayId ';
             $params['displayId'] = $displayId;
+        }
+
+        if ($onlyLoggedIn) {
+            $SQL .= ' AND `display`.loggedIn = 1 ';
         }
 
         $SQL .= '
@@ -411,7 +417,8 @@ class Stats extends Base
 
         $rows = $this->store->select($SQL, $params);
 
-        $output = array();
+        $labels = [];
+        $data = [];
         $maxDuration = 0;
 
         foreach ($rows as $row) {
@@ -432,14 +439,13 @@ class Stats extends Base
         }
 
         foreach ($rows as $row) {
-            $output[] = array(
-                'label' => $this->getSanitizer()->string($row['display']),
-                'value' => $this->getSanitizer()->double($row['duration']) / $divisor
-            );
+            $labels[] = $this->getSanitizer()->string($row['display']);
+            $data[] = round($this->getSanitizer()->double($row['duration']) / $divisor, 2);
         }
 
         $this->getState()->extra = [
-            'data' => $output,
+            'labels' => $labels,
+            'data' => $data,
             'postUnits' => $postUnits
         ];
     }
@@ -460,7 +466,7 @@ class Stats extends Base
         }
 
         if (count($displayIds) <= 0)
-            trigger_error(__('No displays with View permissions'), E_USER_ERROR);
+            throw new InvalidArgumentException(__('No displays with View permissions'), 'displays');
 
         // Get some data for a bandwidth chart
         $dbh = $this->store->getConnection();
@@ -519,28 +525,27 @@ class Stats extends Base
         // Decide what our units are going to be, based on the size
         $base = floor(log($maxSize) / log(1024));
 
-        $output = array();
+        $labels = [];
+        $data = [];
 
         foreach ($results as $row) {
 
             // label depends whether we are filtered by display
             if ($displayId != 0) {
-                $label = $row['type'];
+                $labels[] = $row['type'];
             } else {
-                $label = $row['display'];
+                $labels[] = $row['display'];
             }
 
-            $output[] = array(
-                'label' => $label,
-                'value' => round((double)$row['size'] / (pow(1024, $base)), 2)
-            );
+            $data[] = round((double)$row['size'] / (pow(1024, $base)), 2);
         }
 
         // Set up some suffixes
         $suffixes = array('bytes', 'k', 'M', 'G', 'T');
 
         $this->getState()->extra = [
-            'data' => $output,
+            'labels' => $labels,
+            'data' => $data,
             'postUnits' => (isset($suffixes[$base]) ? $suffixes[$base] : '')
         ];
     }

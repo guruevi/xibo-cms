@@ -28,6 +28,7 @@ use Xibo\Entity\Region;
 use Xibo\Entity\Widget;
 use Xibo\Exception\AccessDeniedException;
 use Xibo\Exception\ConfigurationException;
+use Xibo\Exception\InvalidArgumentException;
 use Xibo\Factory\ApplicationFactory;
 use Xibo\Factory\CampaignFactory;
 use Xibo\Factory\DisplayFactory;
@@ -461,7 +462,7 @@ class User extends Base
         $group = $this->userGroupFactory->getById($this->getSanitizer()->getInt('groupId'));
 
         if ($group->isUserSpecific == 1)
-            throw new \InvalidArgumentException(__('Invalid display group selected'));
+            throw new InvalidArgumentException(__('Invalid user group selected'), 'groupId');
 
         // Save the user
         $user->save();
@@ -469,6 +470,11 @@ class User extends Base
         // Assign the initial group
         $group->assignUser($user);
         $group->save(['validate' => false]);
+
+        // Test to see if the user group selected has permissions to see the homepage selected
+        // Make sure the user has permission to access this page.
+        if (!$user->checkViewable($this->pageFactory->getById($user->homePageId)))
+            throw new InvalidArgumentException(__('User does not have permission for this homepage'), 'homePageId');
 
         // Return
         $this->getState()->hydrate([
@@ -623,7 +629,7 @@ class User extends Base
         $this->getState()->setData([
             'user' => $user,
             'options' => [
-                'homepage' => $this->pageFactory->query(),
+                'homepage' => $this->pageFactory->getForHomepage(),
                 'userTypes' => $this->userTypeFactory->query()
             ],
             'help' => [
@@ -866,9 +872,20 @@ class User extends Base
 
             if ($object->canChangeOwner()) {
                 $object->setOwner($ownerId);
-                $object->save();
+                $object->save(['notify' => false]);
             } else {
                 throw new ConfigurationException(__('Cannot change owner on this Object'));
+            }
+
+            // Nasty handling for ownerId on the Layout
+            // ideally we'd remove that column and rely on the campaign ownerId in 1.9 onward
+            if ($object->permissionsClass() == 'Xibo\Entity\Campaign') {
+                $this->getLog()->debug('Changing owner on child Layout');
+
+                foreach ($this->layoutFactory->getByCampaignId($object->getId()) as $layout) {
+                    $layout->setOwner($ownerId, true);
+                    $layout->save(['notify' => false]);
+                }
             }
         }
 

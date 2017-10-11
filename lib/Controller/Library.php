@@ -26,7 +26,9 @@ use Xibo\Entity\Widget;
 use Xibo\Exception\AccessDeniedException;
 use Xibo\Exception\ConfigurationException;
 use Xibo\Exception\LibraryFullException;
+use Xibo\Exception\XiboException;
 use Xibo\Factory\DataSetFactory;
+use Xibo\Factory\DayPartFactory;
 use Xibo\Factory\DisplayFactory;
 use Xibo\Factory\DisplayGroupFactory;
 use Xibo\Factory\LayoutFactory;
@@ -122,6 +124,9 @@ class Library extends Base
     /** @var ScheduleFactory  */
     private $scheduleFactory;
 
+    /** @var  DayPartFactory */
+    private $dayPartFactory;
+
     /**
      * Set common dependencies.
      * @param LogServiceInterface $log
@@ -147,8 +152,9 @@ class Library extends Base
      * @param DataSetFactory $dataSetFactory
      * @param DisplayFactory $displayFactory
      * @param ScheduleFactory $scheduleFactory
+     * @param DayPartFactory $dayPartFactory
      */
-    public function __construct($log, $sanitizerService, $state, $user, $help, $date, $config, $store, $pool, $userFactory, $moduleFactory, $tagFactory, $mediaFactory, $widgetFactory, $permissionFactory, $layoutFactory, $playlistFactory, $userGroupFactory, $displayGroupFactory, $regionFactory, $dataSetFactory, $displayFactory, $scheduleFactory)
+    public function __construct($log, $sanitizerService, $state, $user, $help, $date, $config, $store, $pool, $userFactory, $moduleFactory, $tagFactory, $mediaFactory, $widgetFactory, $permissionFactory, $layoutFactory, $playlistFactory, $userGroupFactory, $displayGroupFactory, $regionFactory, $dataSetFactory, $displayFactory, $scheduleFactory, $dayPartFactory)
     {
         $this->setCommonDependencies($log, $sanitizerService, $state, $user, $help, $date, $config);
 
@@ -168,6 +174,7 @@ class Library extends Base
         $this->dataSetFactory = $dataSetFactory;
         $this->displayFactory = $displayFactory;
         $this->scheduleFactory = $scheduleFactory;
+        $this->dayPartFactory = $dayPartFactory;
     }
 
     /**
@@ -395,10 +402,14 @@ class Library extends Base
 
             // Thumbnail URL
             $media->thumbnail = '';
+            $media->thumbnailUrl = '';
+            $media->downloadUrl = '';
 
             if ($media->mediaType == 'image') {
                 $download = $this->urlFor('library.download', ['id' => $media->mediaId]) . '?preview=1';
-                $media->thumbnail = '<a class="img-replace" data-toggle="lightbox" data-type="image" href="' . $download . '"><img src="' . $download . '&width=100&height=56" /></i></a>';
+                $media->thumbnail = '<a class="img-replace" data-toggle="lightbox" data-type="image" href="' . $download . '"><img src="' . $download . '&width=100&height=56&cache=1" /></i></a>';
+                $media->thumbnailUrl = $download . '&width=100&height=56&cache=1';
+                $media->downloadUrl = $download;
             }
 
             $media->fileSizeFormatted = ByteFormatter::format($media->fileSize);
@@ -443,6 +454,14 @@ class Library extends Base
                 'linkType' => '_self', 'external' => true,
                 'url' => $this->urlFor('library.download', ['id' => $media->mediaId]) . '?attachment=' . $media->fileName,
                 'text' => __('Download')
+            );
+
+            $media->buttons[] = ['divider' => true];
+
+            $media->buttons[] = array(
+                'id' => 'usage_report_button',
+                'url' => $this->urlFor('library.usage.form', ['id' => $media->mediaId]),
+                'text' => __('Usage Report')
             );
         }
 
@@ -543,7 +562,7 @@ class Library extends Base
      *  summary="Add Media",
      *  description="Add Media to the Library",
      *  @SWG\Parameter(
-     *      name="file",
+     *      name="files",
      *      in="formData",
      *      description="The Uploaded File",
      *      type="file",
@@ -571,7 +590,7 @@ class Library extends Base
      *      required=false
      *  ),
      *  @SWG\Parameter(
-     *      name="removeOldRevisions",
+     *      name="deleteOldRevisions",
      *      in="formData",
      *      description="Flag (0 , 1), to either remove or leave the old file revisions (use with oldMediaId)",
      *      type="integer",
@@ -934,12 +953,20 @@ class Library extends Base
      */
     public function download($mediaId, $type = '')
     {
-        $this->getLog()->debug('Download request for mediaId %d and type %s', $mediaId, $type);
-
         $media = $this->mediaFactory->getById($mediaId);
 
-        if (!$this->getUser()->checkViewable($media))
+        $this->getLog()->debug('Download request for mediaId ' . $mediaId . ' and type ' . $type . '. Media is a ' . $media->mediaType);
+
+        if ($media->mediaType === 'module') {
+            // Make sure that our user has this mediaId assigned to a Widget they can view
+            // we can't test for normal media permissions, because no user has direct access to these "module" files
+            // https://github.com/xibosignage/xibo/issues/1304
+            if (count($this->widgetFactory->query(null, ['mediaId' => $mediaId])) <= 0) {
+                throw new AccessDeniedException();
+            }
+        } else if (!$this->getUser()->checkViewable($media)) {
             throw new AccessDeniedException();
+        }
 
         if ($type != '') {
             $widget = $this->moduleFactory->create($type);
@@ -984,7 +1011,7 @@ class Library extends Base
      */
     public function fontCKEditorConfig()
     {
-        if (DBVERSION < 120)
+        if (DBVERSION < 125)
             return null;
 
         // Regenerate the CSS for fonts
@@ -1304,5 +1331,176 @@ class Library extends Base
             'id' => $media->mediaId,
             'data' => $media
         ]);
+    }
+
+    /**
+     * Library Usage Report Form
+     * @param int $mediaId
+     */
+    public function usageForm($mediaId)
+    {
+        $media = $this->mediaFactory->getById($mediaId);
+
+        if (!$this->getUser()->checkViewable($media))
+            throw new AccessDeniedException();
+
+        // Get a list of displays that this mediaId is used on
+        $displays = $this->displayFactory->query($this->gridRenderSort(), $this->gridRenderFilter(['disableUserCheck' => 1, 'mediaId' => $mediaId]));
+
+        $this->getState()->template = 'library-form-usage';
+        $this->getState()->setData([
+            'media' => $media,
+            'countDisplays' => count($displays)
+        ]);
+    }
+
+    /**
+     * @SWG\Get(
+     *  path="/library/usage/{mediaId}",
+     *  operationId="libraryUsageReport",
+     *  tags={"library"},
+     *  summary="Get Library Item Usage Report",
+     *  description="Get the records for the library item usage report",
+     *  @SWG\Response(
+     *     response=200,
+     *     description="successful operation"
+     *  )
+     * )
+     *
+     * @param int $mediaId
+     */
+    public function usage($mediaId)
+    {
+        $media = $this->mediaFactory->getById($mediaId);
+
+        if (!$this->getUser()->checkViewable($media))
+            throw new AccessDeniedException();
+
+        // Get a list of displays that this mediaId is used on by direct assignment
+        $displays = $this->displayFactory->query($this->gridRenderSort(), $this->gridRenderFilter(['mediaId' => $mediaId]));
+
+        // have we been provided with a date/time to restrict the scheduled events to?
+        $mediaDate = $this->getSanitizer()->getDate('mediaEventDate');
+
+        if ($mediaDate !== null) {
+            // Get a list of scheduled events that this mediaId is used on, based on the date provided
+            $toDate = $mediaDate->copy()->addDay();
+
+            $events = $this->scheduleFactory->query(null, [
+                'futureSchedulesFrom' => $mediaDate->format('U'),
+                'futureSchedulesTo' => $toDate->format('U'),
+                'mediaId' => $mediaId
+            ]);
+        } else {
+            // All scheduled events for this mediaId
+            $events = $this->scheduleFactory->query(null, [
+                'mediaId' => $mediaId
+            ]);
+        }
+
+        // Total records returned from the schedules query
+        $totalRecords = $this->scheduleFactory->countLast();
+
+        foreach ($events as $row) {
+            /* @var \Xibo\Entity\Schedule $row */
+
+            // Generate this event
+            $row->setDayPartFactory($this->dayPartFactory);
+
+            // Assess the date?
+            if ($mediaDate !== null) {
+                try {
+                    $scheduleEvents = $row->getEvents($mediaDate, $toDate);
+                } catch (XiboException $e) {
+                    $this->getLog()->error('Unable to getEvents for ' . $row->eventId);
+                    continue;
+                }
+
+                // Skip events that do not fall within the specified days
+                if (count($scheduleEvents) <= 0)
+                    continue;
+
+                $this->getLog()->debug('EventId ' . $row->eventId . ' as events: ' . json_encode($scheduleEvents));
+            }
+
+            // Load the display groups
+            $row->load();
+
+            foreach ($row->displayGroups as $displayGroup) {
+                foreach ($this->displayFactory->getByDisplayGroupId($displayGroup->displayGroupId) as $display) {
+                    $found = false;
+
+                    // Check to see if our ID is already in our list
+                    foreach ($displays as $existing) {
+                        if ($existing->displayId === $display->displayId) {
+                            $found = true;
+                            break;
+                        }
+                    }
+
+                    if (!$found)
+                        $displays[] = $display;
+                }
+            }
+        }
+
+        $this->getState()->template = 'grid';
+        $this->getState()->recordsTotal = $totalRecords;
+        $this->getState()->setData($displays);
+    }
+
+    /**
+     * @SWG\Get(
+     *  path="/library/usage/layouts/{mediaId}",
+     *  operationId="libraryUsageLayoutsReport",
+     *  tags={"library"},
+     *  summary="Get Library Item Usage Report for Layouts",
+     *  description="Get the records for the library item usage report for Layouts",
+     *  @SWG\Response(
+     *     response=200,
+     *     description="successful operation"
+     *  )
+     * )
+     *
+     * @param int $mediaId
+     */
+    public function usageLayouts($mediaId)
+    {
+        $media = $this->mediaFactory->getById($mediaId);
+
+        if (!$this->getUser()->checkViewable($media))
+            throw new AccessDeniedException();
+
+        $layouts = $this->layoutFactory->query(null, ['mediaId' => $mediaId]);
+
+        if (!$this->isApi()) {
+            foreach ($layouts as $layout) {
+                $layout->includeProperty('buttons');
+
+                // Add some buttons for this row
+                if ($this->getUser()->checkEditable($layout)) {
+                    // Design Button
+                    $layout->buttons[] = array(
+                        'id' => 'layout_button_design',
+                        'linkType' => '_self', 'external' => true,
+                        'url' => $this->urlFor('layout.designer', array('id' => $layout->layoutId)),
+                        'text' => __('Design')
+                    );
+                }
+
+                // Preview
+                $layout->buttons[] = array(
+                    'id' => 'layout_button_preview',
+                    'linkType' => '_blank',
+                    'external' => true,
+                    'url' => $this->urlFor('layout.preview', ['id' => $layout->layoutId]),
+                    'text' => __('Preview Layout')
+                );
+            }
+        }
+
+        $this->getState()->template = 'grid';
+        $this->getState()->recordsTotal = $this->layoutFactory->countLast();
+        $this->getState()->setData($layouts);
     }
 }
