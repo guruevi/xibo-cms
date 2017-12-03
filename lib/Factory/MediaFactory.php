@@ -411,10 +411,10 @@ class MediaFactory extends BaseFactory
 
     /**
      * @param null $sortOrder
-     * @param null $filterBy
+     * @param array $filterBy
      * @return Media[]
      */
-    public function query($sortOrder = null, $filterBy = null)
+    public function query($sortOrder = null, $filterBy = [])
     {
         if ($sortOrder === null)
             $sortOrder = ['name'];
@@ -443,6 +443,13 @@ class MediaFactory extends BaseFactory
             $select .= '
                `media`.released,
                `media`.apiRef,
+            ';
+        }
+
+        if (DBVERSION >= 134) {
+            $select .= '
+               `media`.createdDt,
+               `media`.modifiedDt,
             ';
         }
 
@@ -636,6 +643,8 @@ class MediaFactory extends BaseFactory
                     )
                 ';
             } else {
+                $operator = $this->getSanitizer()->getCheckbox('exactTags') == 1 ? '=' : 'LIKE';
+
                 $body .= " AND `media`.mediaId IN (
                 SELECT `lktagmedia`.mediaId
                   FROM tag
@@ -647,11 +656,14 @@ class MediaFactory extends BaseFactory
                     $i++;
 
                     if ($i == 1)
-                        $body .= " WHERE tag LIKE :tags$i ";
+                        $body .= ' WHERE `tag` ' . $operator . ' :tags' . $i;
                     else
-                        $body .= " OR tag LIKE :tags$i ";
+                        $body .= ' OR `tag` ' . $operator . ' :tags' . $i;
 
-                    $params['tags' . $i] = '%' . $tag . '%';
+                    if ($operator === '=')
+                        $params['tags' . $i] = $tag;
+                    else
+                        $params['tags' . $i] = '%' . $tag . '%';
                 }
 
                 $body .= " ) ";
